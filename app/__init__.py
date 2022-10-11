@@ -25,8 +25,8 @@ def parse_chunks(stream):
     boundary = b'--' + request.headers['content-type'].split(';')[1].split('=')[1].encode(
         'utf-8').strip()  # super lazy/brittle parsing.
     this_frame = b''
-    while True:
-        content = stream.read(4096)
+    content = stream.read(4096)
+    while content != b'':
         this_frame += content
         end = this_frame.find(boundary)
         if end > -1:
@@ -38,8 +38,7 @@ def parse_chunks(stream):
                 except ValueError:
                     continue
                 yield content[:-2]
-        if content == b'':
-            break
+        content = stream.read(4096)
 
 
 @app.post("/NmspServlet/")
