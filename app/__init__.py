@@ -1,18 +1,27 @@
-import audioop
 from flask import Flask, request, Response
 from email.mime.multipart import MIMEMultipart
 from email.message import Message
 import json
 from speex import SpeexDecoder
 from vosk import Model, KaldiRecognizer
+from rnnoise_wrapper import RNNoise
+from pydub import AudioSegment
+import audioop
 
 app = Flask(__name__)
 
 decoder = SpeexDecoder(1)
+
 model = Model(lang="it")
 rec = KaldiRecognizer(model, 16000)
 rec.SetWords(True)
 rec.SetPartialWords(True)
+
+try:
+    rnnoise = RNNoise("/usr/local/lib/librnnoise.so")
+except Exception as e:
+    rnnoise = None
+    print("RNNoise not found")
 
 
 @app.route("/heartbeat")
@@ -57,17 +66,23 @@ def asr():
     response_part.add_header('Content-Type', 'application/JSON; charset=utf-8')
 
     try:
+        # complete = AudioSegment.empty()
+
         # Dirty way to remove initial/final button click
         if len(chunks) > 15:
             chunks = chunks[12:-3]
-
-        # Transcribing audio chunk
         for chunk in chunks:
-            out = decoder.decode(chunk)
+            decoded = decoder.decode(chunk)
             # Boosting the audio volume
-            out = audioop.mul(out, 2, 4)
-            rec.AcceptWaveform(out)
+            decoded = audioop.mul(decoded, 2, 6)
+            audio = AudioSegment(decoded, sample_width=2, frame_rate=16000, channels=1)
+            if rnnoise:
+                audio = rnnoise.filter(audio[0:10]) + rnnoise.filter(audio[10:20])
+            # Transcribing audio chunk
+            rec.AcceptWaveform(audio.raw_data)
+            # complete += audio
 
+        # complete.export(out_f="out.wav", format="wav")
         final = json.loads(rec.Result())
 
         if final["text"]:
@@ -89,14 +104,13 @@ def asr():
                 "Prompt": "Sorry, speech not recognized. Please try again."
             }))
     except Exception as e:
-        print(str(e))
+        print("Error occurred:", str(e))
         response_part.add_header('Content-Disposition', 'form-data; name="QueryRetry"')
         response_part.set_payload(json.dumps({
             "Cause": 1,
             "Name": "AUDIO_INFO",
             "Prompt": "Error while decoding incoming audio."
         }))
-
 
     # Closing response
     # From: https://github.com/pebble-dev/rebble-asr/blob/37302ebed464b7354accc9f4b6aa22736e12b266/asr/__init__.py#L113
