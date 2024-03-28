@@ -4,6 +4,11 @@ Replacement dictation service for Pebble Time/Pebble 2 based on SaluteSpeech, vo
 
 Please note that this service is relevant only for russian-speaking Pebble community, especially living in Russia or CIS.
 
+## Demo
+
+<img src="img/e1.jpg" width="200" alt="Screen of Pebble Time with recognized text 'Система распознавания работает на салют speech.'">
+<img src="img/e2.jpg" width="200" alt="Screen of Pebble Time with recognized text 'Российские бренды Сбербанк тинькофф втб ozon wildberries.'">
+
 ## How to install
 
 This software relies on [Speex Python Library](https://pypi.org/project/speex/) which is unfortunately outdated and works only with <= Python 3.7. Keep in mind that this is Linux-only app.
