@@ -1,0 +1,4 @@
+settings = {
+    "secret_auth": "",
+    "rquid": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxx"
+}

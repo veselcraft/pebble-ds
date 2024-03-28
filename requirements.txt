@@ -30,7 +30,6 @@ tqdm==4.64.1
 transformers==4.22.2
 typing_extensions==4.4.0
 urllib3==1.26.12
-vosk==0.3.44
 websockets==10.3
 Werkzeug==2.2.2
 zipp==3.9.0

@@ -3,19 +3,18 @@ from email.mime.multipart import MIMEMultipart
 from email.message import Message
 import json
 from speex import SpeexDecoder
-from vosk import Model, KaldiRecognizer
 from rnnoise_wrapper import RNNoise
 from pydub import AudioSegment
+import random
 import audioop
+import io
 
 app = Flask(__name__)
 
 decoder = SpeexDecoder(1)
 
-model = Model(lang="it")
-rec = KaldiRecognizer(model, 16000)
-rec.SetWords(True)
-rec.SetPartialWords(True)
+sbertoken = ''
+tokenexp = 0
 
 try:
     rnnoise = RNNoise("/usr/local/lib/librnnoise.so")
@@ -23,11 +22,9 @@ except Exception as e:
     rnnoise = None
     print("RNNoise not found")
 
-
 @app.route("/heartbeat")
 def heartbeat():
     return "asr"
-
 
 # From: https://github.com/pebble-dev/rebble-asr/blob/37302ebed464b7354accc9f4b6aa22736e12b266/asr/__init__.py#L27
 def parse_chunks(stream):
@@ -50,6 +47,50 @@ def parse_chunks(stream):
         if content == b'':
             break
 
+def salutespeech_updatetoken():
+    import requests
+    from config import settings
+    
+    secret_auth = settings['secret_auth']
+    rquid = settings['rquid']
+
+    url = 'https://ngw.devices.sberbank.ru:9443/api/v2/oauth'
+    headers = {
+        'Authorization': 'Basic '+secret_auth,
+        'RqUID': rquid,
+        'Content-Type': 'application/x-www-form-urlencoded'
+    }
+
+    response = requests.post(url, headers=headers, data="scope=SALUTE_SPEECH_PERS", verify=False)
+
+    global sbertoken
+    global tokenexp
+    sbertoken = json.loads(response.text)["access_token"]
+    tokenexp = (float(json.loads(response.text)["expires_at"]) / 1000) - 60*5
+
+def salutespeech_recognize(binary): # wtffff quok reference
+    import requests
+    import time
+    # check if token is expired
+    current_unix_time = int(time.time())
+    if tokenexp < current_unix_time:
+        salutespeech_updatetoken()
+
+    url = 'https://smartspeech.sber.ru/rest/v1/speech:recognize'
+    headers = {
+        'Authorization': 'Bearer '+sbertoken,
+        'Content-Type': 'audio/x-pcm;bit=16;rate=16000'
+    }
+
+    response = requests.post(url, headers=headers, data=binary, verify=False)
+
+    words = ''
+    wordstmp = json.loads(response.text)["result"];
+    for sentence in wordstmp:
+        words += sentence
+
+    return words
+
 
 @app.post("/NmspServlet/")
 def asr():
@@ -66,7 +107,7 @@ def asr():
     response_part.add_header('Content-Type', 'application/JSON; charset=utf-8')
 
     try:
-        # complete = AudioSegment.empty()
+        complete = AudioSegment.empty()
 
         # Dirty way to remove initial/final button click
         if len(chunks) > 15:
@@ -74,24 +115,26 @@ def asr():
         for chunk in chunks:
             decoded = decoder.decode(chunk)
             # Boosting the audio volume
-            decoded = audioop.mul(decoded, 2, 6)
+            # decoded = audioop.mul(decoded, 2, 6)
             audio = AudioSegment(decoded, sample_width=2, frame_rate=16000, channels=1)
             if rnnoise:
                 audio = rnnoise.filter(audio[0:10]) + rnnoise.filter(audio[10:20])
-            # Transcribing audio chunk
-            rec.AcceptWaveform(audio.raw_data)
-            # complete += audio
+            complete += audio
 
-        # complete.export(out_f="out.wav", format="wav")
-        final = json.loads(rec.Result())
+        ### For debugging purposes. Uncomment this if you wanna hear what's coming from Pebble's microphone
+        # filename = str(random.random()) + ".wav"
+        # complete.export(out_f=filename, format="wav")
 
-        if final["text"]:
-            output = []
-            for partial in final["result"]:
-                output.append({'word': partial["word"], 'confidence': str(partial["conf"])})
-            output[0]['word'] += '\\*no-space-before'
-            output[0]['word'] = output[0]['word'][0].upper() + output[0]['word'][1:]
+        buffer = io.BytesIO()
+        complete.export(buffer, format="wav")
+        final = salutespeech_recognize(buffer)
+
+        if final:
             response_part.add_header('Content-Disposition', 'form-data; name="QueryResult"')
+            output = []
+            for word in final.split(" "):
+                output.append({'word': word, 'confidence': 1})
+            output[0]['word'] += '\\*no-space-before'
             response_part.set_payload(json.dumps({
                 'words': [output],
             }))
@@ -119,6 +162,4 @@ def asr():
     response = Response('\r\n' + parts.as_string().split("\n", 3)[3].replace('\n', '\r\n'))
     response.headers['Content-Type'] = f'multipart/form-data; boundary={parts.get_boundary()}'
 
-    # Resetting Recognizer
-    rec.Reset()
     return response
